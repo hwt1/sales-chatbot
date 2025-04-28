@@ -4,12 +4,11 @@ import os
 import gradio as gr
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.chains.retrieval import create_retrieval_chain
-from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain_community.vectorstores import FAISS
-from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain_core.tracers import ConsoleCallbackHandler
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from openai import OpenAI
 
 from config import OPENAI_API_KEY, OPENAI_BASE_URL
 
@@ -69,10 +68,44 @@ def init_sales_bot(vector_store_dir:str ='sale_faiss'):
     #retriever_chain.combine_docs_chain.verbose = True
     # 返回向量数据库的检索结果
     #retriever_chain.return_source_documents = True
+    openai_client = OpenAI(
+        base_url="https://vip.apiyi.com/v1",
+        api_key=os.getenv('YI_API_KEY')
+    )
 
-    global SALES_BOT
+    global SALES_BOT,OPENAI_CLIENT
     SALES_BOT = retriever_chain
-    return SALES_BOT
+    OPENAI_CLIENT = openai_client
+
+
+# 实时录音并转文字的函数
+def transcribe_audio(audio):
+    """将音频转录为文本"""
+    audio_file = open(audio, "rb")
+    response = OPENAI_CLIENT.audio.transcriptions.create(model = "whisper-1", file=audio_file)
+    print(response)
+    return response.text
+
+# 文本到语音的函数
+def text_to_speech(text):
+    """将文本转换为语音并保存"""
+    with OPENAI_CLIENT.audio.speech.with_streaming_response.create(model='tts-1',voice="alloy",input=text) as res:
+        res.stream_to_file("output.mp3")
+    return "output.mp3"
+
+def audio_chat(audio):
+    if audio is None:
+        return '',None
+    # 1、从语音中获取文本
+    query = transcribe_audio(audio)
+    # 2、根据查询问题获取结果
+    callback_handler = ConsoleCallbackHandler()
+    ans = SALES_BOT.invoke({'input': query}, config={"callbacks": [callback_handler]})
+    answer_text = ans['answer']
+    # 3、将咨询回答转为语音
+    ans_audio_path = text_to_speech(answer_text)
+
+    return answer_text,ans_audio_path
 
 def sales_chat(message,history):
     print(f"[message]{message}")
@@ -94,12 +127,16 @@ def sales_chat(message,history):
         return "这个问题我要问问领导"
 # 5、创建 gradio界面
 def launch_gradio():
-    app = gr.ChatInterface(
-        fn=sales_chat,
-        title='房产销售',
-        chatbot=gr.Chatbot(height=400)
+    chat_tab = gr.ChatInterface(fn=sales_chat,title='房产销售')
+
+    simple_audio_tab=gr.Interface(
+        fn=audio_chat,
+        inputs=[gr.Audio(sources=["microphone"], type='filepath')],
+        outputs=[gr.Textbox(), gr.Audio(type='filepath')],
+        live=True
     )
-    app.launch(share=False,server_name='127.0.0.1')
+    app = gr.TabbedInterface([chat_tab, simple_audio_tab], ["文字对话", "简易语音对话"])
+    app.launch(share=True,server_name='127.0.0.1')
 
 if __name__ == '__main__':
     # 初始化房产销售机器人
