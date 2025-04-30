@@ -68,15 +68,18 @@ def init_sales_bot(vector_store_dir:str ='sale_faiss'):
     #retriever_chain.combine_docs_chain.verbose = True
     # 返回向量数据库的检索结果
     #retriever_chain.return_source_documents = True
+
+    global SALES_BOT
+    SALES_BOT = retriever_chain
+
+
+def init_openai():
     openai_client = OpenAI(
-        base_url="https://vip.apiyi.com/v1",
-        api_key=os.getenv('YI_API_KEY')
+        api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL
     )
 
-    global SALES_BOT,OPENAI_CLIENT
-    SALES_BOT = retriever_chain
+    global OPENAI_CLIENT
     OPENAI_CLIENT = openai_client
-
 
 # 实时录音并转文字的函数
 def transcribe_audio(audio):
@@ -141,5 +144,6 @@ def launch_gradio():
 if __name__ == '__main__':
     # 初始化房产销售机器人
     init_sales_bot()
+    init_openai()
     # 启动 gradio服务
     launch_gradio()
